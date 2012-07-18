@@ -3794,7 +3794,7 @@ ngx_http_core_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
                               prev->sendfile_max_chunk, 0);
 #if (NGX_HAVE_FILE_AIO)
     ngx_conf_merge_value(conf->aio, prev->aio, NGX_HTTP_AIO_OFF);
-    if (conf->aio == NGX_HTTP_AIO_BUFFERD) {
+    if (conf->aio == NGX_HTTP_AIO_BUFFERED) {
         if (conf->directio == NGX_OPEN_FILE_DIRECTIO_OFF) {
             ngx_conf_log_error(NGX_LOG_WARN, cf, 0,
                                "aio_buffered forces the directio off");
