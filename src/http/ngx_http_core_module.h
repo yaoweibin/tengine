@@ -28,6 +28,7 @@
 #define NGX_HTTP_AIO_OFF                0
 #define NGX_HTTP_AIO_ON                 1
 #define NGX_HTTP_AIO_SENDFILE           2
+#define NGX_HTTP_AIO_BUFFERED           3
 
 
 #define NGX_HTTP_SATISFY_ALL            0

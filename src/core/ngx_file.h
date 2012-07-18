@@ -25,6 +25,7 @@ struct ngx_file_s {
 
 #if (NGX_HAVE_FILE_AIO)
     ngx_event_aio_t           *aio;
+    unsigned                   aio_buffered:1;
 #endif
 
     unsigned                   valid_info:1;

@@ -121,6 +121,10 @@ ngx_http_copy_filter(ngx_http_request_t *r, ngx_chain_t *in)
 
 #if (NGX_HAVE_FILE_AIO)
         if (ngx_file_aio) {
+            if (clcf->aio == NGX_HTTP_AIO_BUFFERED) {
+                ctx->aio_buffered = 1;
+            }
+
             if (clcf->aio) {
                 ctx->aio_handler = ngx_http_copy_aio_handler;
             }

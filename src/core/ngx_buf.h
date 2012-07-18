@@ -92,6 +92,7 @@ struct ngx_output_chain_ctx_s {
     unsigned                     need_in_temp:1;
 #if (NGX_HAVE_FILE_AIO)
     unsigned                     aio:1;
+    unsigned                     aio_buffered:1;
 
     ngx_output_chain_aio_pt      aio_handler;
 #endif

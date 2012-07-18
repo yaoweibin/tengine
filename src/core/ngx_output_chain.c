@@ -525,6 +525,10 @@ ngx_output_chain_copy_buf(ngx_output_chain_ctx_t *ctx)
 #if (NGX_HAVE_FILE_AIO)
 
         if (ctx->aio_handler) {
+            if (ctx->aio_buffered) {
+                src->file->aio_buffered = 1;
+            }
+
             n = ngx_file_aio_read(src->file, dst->pos, (size_t) size,
                                   src->file_pos, ctx->pool);
             if (n == NGX_AGAIN) {

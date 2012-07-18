@@ -118,6 +118,7 @@ static ngx_conf_enum_t  ngx_http_core_request_body_in_file[] = {
 static ngx_conf_enum_t  ngx_http_core_aio[] = {
     { ngx_string("off"), NGX_HTTP_AIO_OFF  },
     { ngx_string("on"), NGX_HTTP_AIO_ON },
+    { ngx_string("buffered"), NGX_HTTP_AIO_BUFFERED },
 #if (NGX_HAVE_AIO_SENDFILE)
     { ngx_string("sendfile"), NGX_HTTP_AIO_SENDFILE },
 #endif
@@ -3793,6 +3794,15 @@ ngx_http_core_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
                               prev->sendfile_max_chunk, 0);
 #if (NGX_HAVE_FILE_AIO)
     ngx_conf_merge_value(conf->aio, prev->aio, NGX_HTTP_AIO_OFF);
+    if (conf->aio == NGX_HTTP_AIO_BUFFERD) {
+        if (conf->directio == NGX_OPEN_FILE_DIRECTIO_OFF) {
+            ngx_conf_log_error(NGX_LOG_WARN, cf, 0,
+                               "aio_buffered forces the directio off");
+
+            conf->directio = NGX_OPEN_FILE_DIRECTIO_OFF;
+        }
+    }
+
 #endif
     ngx_conf_merge_size_value(conf->read_ahead, prev->read_ahead, 0);
     ngx_conf_merge_off_value(conf->directio, prev->directio,

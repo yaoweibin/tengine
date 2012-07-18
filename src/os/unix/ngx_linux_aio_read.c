@@ -14,6 +14,11 @@ extern int            ngx_eventfd;
 extern aio_context_t  ngx_aio_ctx;
 
 
+#ifndef IOCB_CMD_BAIO_PREAD
+#define IOCB_CMD_BAIO_PREAD 9
+#endif
+
+
 static void ngx_file_aio_event_handler(ngx_event_t *ev);
 
 
@@ -85,7 +90,13 @@ ngx_file_aio_read(ngx_file_t *file, u_char *buf, size_t size, off_t offset,
     ngx_memzero(&aio->aiocb, sizeof(struct iocb));
 
     aio->aiocb.aio_data = (uint64_t) (uintptr_t) ev;
-    aio->aiocb.aio_lio_opcode = IOCB_CMD_PREAD;
+
+    if (file->aio_buffered) {
+        aio->aiocb.aio_lio_opcode = IOCB_CMD_BAIO_PREAD;
+    } else {
+        aio->aiocb.aio_lio_opcode = IOCB_CMD_PREAD;
+    }
+
     aio->aiocb.aio_fildes = file->fd;
     aio->aiocb.aio_buf = (uint64_t) (uintptr_t) buf;
     aio->aiocb.aio_nbytes = size;
