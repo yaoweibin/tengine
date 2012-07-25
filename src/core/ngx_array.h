@@ -13,12 +13,23 @@
 #include <ngx_core.h>
 
 
+typedef struct ngx_array_link_s ngx_array_link_t;
+
+
+struct ngx_array_link_s {
+    void                    *elts;
+    ngx_array_link_t        *next;
+};
+
+
 struct ngx_array_s {
     void        *elts;
     ngx_uint_t   nelts;
     size_t       size;
     ngx_uint_t   nalloc;
     ngx_pool_t  *pool;
+
+    ngx_array_link_t *old_elts;
 };
 
 
@@ -40,6 +51,7 @@ ngx_array_init(ngx_array_t *array, ngx_pool_t *pool, ngx_uint_t n, size_t size)
     array->size = size;
     array->nalloc = n;
     array->pool = pool;
+    array->old_elts = NULL;
 
     array->elts = ngx_palloc(pool, n * size);
     if (array->elts == NULL) {

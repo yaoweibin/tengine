@@ -10,7 +10,7 @@
 
 
 #define nginx_version      1002002
-#define NGINX_VERSION      "1.2.2"
+#define NGINX_VERSION      "1.2.2 (no pool)"
 #define NGINX_VER          "nginx/" NGINX_VERSION
 
 #define tengine_version    1004000

@@ -38,28 +38,21 @@ struct ngx_pool_cleanup_s {
 };
 
 
-typedef struct ngx_pool_large_s  ngx_pool_large_t;
+typedef struct ngx_pool_data_s   ngx_pool_large_t;
+typedef struct ngx_pool_data_s   ngx_pool_data_t;
 
-struct ngx_pool_large_s {
-    ngx_pool_large_t     *next;
-    void                 *alloc;
+
+struct ngx_pool_data_s {
+    ngx_pool_data_t        *next;
+    void                   *alloc;
 };
 
 
-typedef struct {
-    u_char               *last;
-    u_char               *end;
-    ngx_pool_t           *next;
-    ngx_uint_t            failed;
-} ngx_pool_data_t;
-
-
 struct ngx_pool_s {
-    ngx_pool_data_t       d;
+    ngx_pool_data_t      *d;
     size_t                max;
     ngx_pool_t           *current;
     ngx_chain_t          *chain;
-    ngx_pool_large_t     *large;
     ngx_pool_cleanup_t   *cleanup;
     ngx_log_t            *log;
 };
@@ -82,7 +75,6 @@ void ngx_reset_pool(ngx_pool_t *pool);
 void *ngx_palloc(ngx_pool_t *pool, size_t size);
 void *ngx_pnalloc(ngx_pool_t *pool, size_t size);
 void *ngx_pcalloc(ngx_pool_t *pool, size_t size);
-void *ngx_prealloc(ngx_pool_t *pool, void *p, size_t old_size, size_t new_size);
 void *ngx_pmemalign(ngx_pool_t *pool, size_t size, size_t alignment);
 ngx_int_t ngx_pfree(ngx_pool_t *pool, void *p);
 
