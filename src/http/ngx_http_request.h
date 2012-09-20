@@ -285,6 +285,7 @@ typedef struct {
     ngx_http_client_body_handler_pt   post_handler;
 
     /* For non buffered request body buffer */
+    ngx_chain_t                      *out;
     ngx_chain_t                      *busy;
     ngx_chain_t                      *free;
     ngx_chain_t                     **last_out;

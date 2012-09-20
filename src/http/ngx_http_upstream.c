@@ -31,6 +31,9 @@ static ngx_int_t ngx_http_upstream_reinit(ngx_http_request_t *r,
     ngx_http_upstream_t *u);
 static void ngx_http_upstream_send_request(ngx_http_request_t *r,
     ngx_http_upstream_t *u);
+static ngx_int_t ngx_http_upstream_output_filter_init(void *data);
+static ngx_int_t ngx_http_upstream_output_filter(void *data,
+    ngx_chain_t *in);
 static void ngx_http_upstream_send_request_handler(ngx_http_request_t *r,
     ngx_http_upstream_t *u);
 static void ngx_http_upstream_send_non_buffered_request(ngx_http_request_t *r,
@@ -505,6 +508,10 @@ ngx_http_upstream_init_request(ngx_http_request_t *r)
         u->request_bufs = r->request_body->bufs;
     }
 
+    u->output_filter_init = ngx_http_upstream_output_filter_init;
+    u->output_filter = ngx_http_upstream_output_filter;
+    u->output_filter_ctx = r;
+
     if (u->create_request(r) != NGX_OK) {
         ngx_http_finalize_request(r, NGX_HTTP_INTERNAL_SERVER_ERROR);
         return;
@@ -514,6 +521,7 @@ ngx_http_upstream_init_request(ngx_http_request_t *r)
 
     clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
 
+    /* This code could be used the pipe output chain for some purposes */
     u->output.alignment = clcf->directio_alignment;
     u->output.pool = r->pool;
     u->output.bufs.num = 1;
@@ -1177,6 +1185,13 @@ ngx_http_upstream_connect(ngx_http_request_t *r, ngx_http_upstream_t *u)
     c->read->log = c->log;
     c->write->log = c->log;
 
+    /* init the output filter */
+    if (u->output_filter_init(u->output_filter_ctx) != NGX_OK) {
+        ngx_http_upstream_finalize_request(r, u,
+                                           NGX_HTTP_INTERNAL_SERVER_ERROR);
+        return;
+    }
+
     /* init or reinit the ngx_output_chain() and ngx_chain_writer() contexts */
 
     u->writer.out = NULL;
@@ -1485,6 +1500,20 @@ ngx_http_upstream_send_request(ngx_http_request_t *r, ngx_http_upstream_t *u)
 }
 
 
+static ngx_int_t
+ngx_http_upstream_output_filter_init(void *data)
+{
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_upstream_output_filter(void *data, ngx_chain_t *in)
+{
+    return NGX_OK;
+}
+
+
 static void
 ngx_http_upstream_send_non_buffered_request(ngx_http_request_t *r,
     ngx_http_upstream_t *u)
@@ -1504,12 +1533,6 @@ ngx_http_upstream_send_non_buffered_request(ngx_http_request_t *r,
         ngx_http_upstream_next(r, u, NGX_HTTP_UPSTREAM_FT_ERROR);
         return;
     }
-
-    /* 
-     * We use the upstream connection write event to read data from client,
-     * and we disable the read event with client.
-     * */
-    r->read_event_handler = ngx_http_upstream_rd_check_broken_connection;
 
     rb = r->request_body;
 
@@ -1556,6 +1579,13 @@ ngx_http_upstream_send_non_buffered_request(ngx_http_request_t *r,
         }
 
         c->log->action = "sending no buffered request to upstream";
+
+        if (u->output_filter(u->output_filter_ctx, out) != NGX_OK) {
+            ngx_http_upstream_finalize_request(r, u,
+                NGX_HTTP_INTERNAL_SERVER_ERROR);
+
+            return;
+        }
 
 #if 1
         ngx_buf_t   *buf;

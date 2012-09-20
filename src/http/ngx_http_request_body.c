@@ -52,18 +52,19 @@ ngx_http_read_client_request_body(ngx_http_request_t *r,
             return rc;
         }
 
+        rb = r->request_body;
+
         if (rc == NGX_AGAIN) {
 
-            r->read_event_handler =
-                ngx_http_read_non_buffered_client_request_body_handler;
+            if (rb && rb->buffered) {
+                r->read_event_handler =
+                    ngx_http_read_non_buffered_client_request_body_handler;
+            }
 
             return rc;
         }
 
         /* NGX_OK */
-
-
-        rb = r->request_body;
 
         if (rb && rb->buffered == 0) {
             return rc;
