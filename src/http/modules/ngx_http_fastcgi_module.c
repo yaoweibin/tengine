@@ -75,6 +75,8 @@ typedef struct {
 
     ngx_str_t                      script_name;
     ngx_str_t                      path_info;
+
+    ngx_chain_t                   *body;
 } ngx_http_fastcgi_ctx_t;
 
 
@@ -135,6 +137,8 @@ static ngx_int_t ngx_http_fastcgi_create_key(ngx_http_request_t *r);
 static ngx_int_t ngx_http_fastcgi_create_request(ngx_http_request_t *r);
 static ngx_int_t ngx_http_fastcgi_reinit_request(ngx_http_request_t *r);
 static ngx_int_t ngx_http_fastcgi_process_header(ngx_http_request_t *r);
+static ngx_int_t ngx_http_fastcgi_output_filter_init(void *data);
+static ngx_int_t ngx_http_fastcgi_output_filter(void *data, ngx_chain_t *in);
 static ngx_int_t ngx_http_fastcgi_input_filter_init(void *data);
 static ngx_int_t ngx_http_fastcgi_input_filter(ngx_event_pipe_t *p,
     ngx_buf_t *buf);
@@ -230,6 +234,13 @@ static ngx_command_t  ngx_http_fastcgi_commands[] = {
       ngx_conf_set_access_slot,
       NGX_HTTP_LOC_CONF_OFFSET,
       offsetof(ngx_http_fastcgi_loc_conf_t, upstream.store_access),
+      NULL },
+
+    { ngx_string("fastcgi_request_buffering"),
+      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
+      ngx_conf_set_flag_slot,
+      NGX_HTTP_LOC_CONF_OFFSET,
+      offsetof(ngx_http_fastcgi_loc_conf_t, upstream.request_buffering),
       NULL },
 
     { ngx_string("fastcgi_ignore_client_abort"),
@@ -620,6 +631,13 @@ ngx_http_fastcgi_handler(ngx_http_request_t *r)
     u->abort_request = ngx_http_fastcgi_abort_request;
     u->finalize_request = ngx_http_fastcgi_finalize_request;
     r->state = 0;
+
+    r->request_buffering = flcf->upstream.request_buffering;
+    if (!r->request_buffering) {
+        u->output_filter_init = ngx_http_fastcgi_output_filter_init;
+        u->output_filter = ngx_http_fastcgi_output_filter;
+        u->output_filter_ctx = r;
+    }
 
     u->buffering = 1;
 
@@ -1196,6 +1214,35 @@ ngx_http_fastcgi_reinit_request(ngx_http_request_t *r)
     f->large_stderr = 0;
 
     r->state = 0;
+
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_fastcgi_output_filter_init(void *data)
+{
+    ngx_http_request_t      *r = data;
+    ngx_http_fastcgi_ctx_t  *f;
+
+    f = ngx_http_get_module_ctx(r, ngx_http_fastcgi_module);
+
+    f->body = r->upstream->request_bufs;
+    r->upstream->request_bufs = NULL;
+
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_fastcgi_output_filter(void *data, ngx_chain_t *in)
+{
+    ngx_http_request_t  *r = data;
+
+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "http fastcgi output filter");
+
+    /*TODO: copy the chain in to r->request_bufs, do some packaging work*/
 
     return NGX_OK;
 }

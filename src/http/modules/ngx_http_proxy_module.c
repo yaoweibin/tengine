@@ -101,6 +101,8 @@ static ngx_int_t ngx_http_proxy_create_request(ngx_http_request_t *r);
 static ngx_int_t ngx_http_proxy_reinit_request(ngx_http_request_t *r);
 static ngx_int_t ngx_http_proxy_process_status_line(ngx_http_request_t *r);
 static ngx_int_t ngx_http_proxy_process_header(ngx_http_request_t *r);
+static ngx_int_t ngx_http_proxy_output_filter_init(void *data);
+static ngx_int_t ngx_http_proxy_output_filter(void *data, ngx_chain_t *in);
 static ngx_int_t ngx_http_proxy_input_filter_init(void *data);
 static ngx_int_t ngx_http_proxy_copy_filter(ngx_event_pipe_t *p,
     ngx_buf_t *buf);
@@ -691,6 +693,12 @@ ngx_http_proxy_handler(ngx_http_request_t *r)
     }
 
     r->request_buffering = plcf->upstream.request_buffering;
+    if (!r->request_buffering) {
+        u->output_filter_init = ngx_http_proxy_output_filter_init;
+        u->output_filter = ngx_http_proxy_output_filter;
+        u->output_filter_ctx = r;
+    }
+
     u->buffering = plcf->upstream.buffering;
 
     u->pipe = ngx_pcalloc(r->pool, sizeof(ngx_event_pipe_t));
@@ -1266,6 +1274,42 @@ ngx_http_proxy_reinit_request(ngx_http_request_t *r)
     r->upstream->pipe->input_filter = ngx_http_proxy_copy_filter;
     r->upstream->input_filter = ngx_http_proxy_non_buffered_copy_filter;
     r->state = 0;
+
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_proxy_output_filter_init(void *data)
+{
+    ngx_http_request_t  *r = data;
+
+    r->upstream->request_bufs = NULL;
+
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_proxy_output_filter(void *data, ngx_chain_t *in)
+{
+    ngx_chain_t         *cl;
+    ngx_http_request_t  *r = data;
+
+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "http proxy output filter");
+
+    if (r->upstream->request_bufs == NULL) {
+        r->upstream->request_bufs = in;
+    } else {
+        cl = r->upstream->request_bufs;
+
+        while (cl->next) {
+            cl = cl->next;
+        }
+
+        cl->next = in;
+    }
 
     return NGX_OK;
 }

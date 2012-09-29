@@ -508,9 +508,17 @@ ngx_http_upstream_init_request(ngx_http_request_t *r)
         u->request_bufs = r->request_body->bufs;
     }
 
-    u->output_filter_init = ngx_http_upstream_output_filter_init;
-    u->output_filter = ngx_http_upstream_output_filter;
-    u->output_filter_ctx = r;
+    if (!u->output_filter) {
+        u->output_filter_init = ngx_http_upstream_output_filter_init;
+        u->output_filter = ngx_http_upstream_output_filter;
+        u->output_filter_ctx = r;
+    }
+
+    if (u->output_filter_init && u->output_filter_init(u->output_filter_ctx)
+       != NGX_OK) {
+        ngx_http_finalize_request(r, NGX_HTTP_INTERNAL_SERVER_ERROR);
+        return;
+    }
 
     if (u->create_request(r) != NGX_OK) {
         ngx_http_finalize_request(r, NGX_HTTP_INTERNAL_SERVER_ERROR);
@@ -1185,13 +1193,6 @@ ngx_http_upstream_connect(ngx_http_request_t *r, ngx_http_upstream_t *u)
     c->read->log = c->log;
     c->write->log = c->log;
 
-    /* init the output filter */
-    if (u->output_filter_init(u->output_filter_ctx) != NGX_OK) {
-        ngx_http_upstream_finalize_request(r, u,
-                                           NGX_HTTP_INTERNAL_SERVER_ERROR);
-        return;
-    }
-
     /* init or reinit the ngx_output_chain() and ngx_chain_writer() contexts */
 
     u->writer.out = NULL;
@@ -1520,7 +1521,6 @@ ngx_http_upstream_send_non_buffered_request(ngx_http_request_t *r,
 {
     off_t                      rest;
     ngx_int_t                  rc;
-    ngx_chain_t               *out;
     ngx_connection_t          *c;
     ngx_http_request_body_t   *rb;
 
@@ -1538,12 +1538,7 @@ ngx_http_upstream_send_non_buffered_request(ngx_http_request_t *r,
 
     for ( ;; ) {
 
-        out = NULL;
-
-        if (!u->request_sent) {
-            out = u->request_bufs;
-
-        } else if (rb && rb->rest) {
+        if (u->request_sent && rb && rb->rest) {
             c->log->action = "reading no buffered request body from client";
 
             rb->bufs = NULL;
@@ -1557,8 +1552,6 @@ ngx_http_upstream_send_non_buffered_request(ngx_http_request_t *r,
                 ngx_http_upstream_finalize_request(r, u, rc);
                 return;
             }
-
-            out = rb->bufs;;
 
             if (rc == NGX_OK && rest == rb->rest) {
                 break;
@@ -1580,7 +1573,7 @@ ngx_http_upstream_send_non_buffered_request(ngx_http_request_t *r,
 
         c->log->action = "sending no buffered request to upstream";
 
-        if (u->output_filter(u->output_filter_ctx, out) != NGX_OK) {
+        if (u->output_filter(u->output_filter_ctx, rb->bufs) != NGX_OK) {
             ngx_http_upstream_finalize_request(r, u,
                 NGX_HTTP_INTERNAL_SERVER_ERROR);
 
@@ -1591,7 +1584,7 @@ ngx_http_upstream_send_non_buffered_request(ngx_http_request_t *r,
         ngx_buf_t   *buf;
         ngx_chain_t *cl;
 
-        for (cl = out; cl; cl = cl->next) {
+        for (cl = u->request_bufs; cl; cl = cl->next) {
             buf = cl->buf;
             ngx_log_debug3(NGX_LOG_DEBUG_HTTP, c->log, 0,
                            "http upstream send out bufs: p=%p, s=%d, size=%uO",
@@ -1599,13 +1592,13 @@ ngx_http_upstream_send_non_buffered_request(ngx_http_request_t *r,
         }
 #endif
 
-        rc = ngx_output_chain(&u->output, out);
+        rc = ngx_output_chain(&u->output, u->request_bufs);
 
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP, c->log, 0,
                        "http upstream send no buffered request: rc=%i", rc);
 
-        ngx_chain_update_chains(r->pool, &rb->free, &rb->busy, &out,
-                                (ngx_buf_tag_t) &ngx_http_core_module);
+        ngx_chain_update_chains(r->pool, &rb->free, &rb->busy, &u->request_bufs,
+                (ngx_buf_tag_t) &ngx_http_core_module);
 
 #if 1
         for (cl = rb->busy; cl; cl = cl->next) {
