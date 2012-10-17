@@ -2755,7 +2755,7 @@ ngx_http_proxy_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
                               prev->upstream.store_access, 0600);
 
     ngx_conf_merge_value(conf->upstream.request_buffering,
-                              prev->upstream.request_buffering, 1);
+                         prev->upstream.request_buffering, 1);
 
     ngx_conf_merge_value(conf->upstream.buffering,
                               prev->upstream.buffering, 1);

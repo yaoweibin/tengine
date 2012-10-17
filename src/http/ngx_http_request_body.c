@@ -719,9 +719,10 @@ ngx_http_do_read_non_buffered_client_request_body(ngx_http_request_t *r)
             rb->rest -= n;
             r->request_length += n;
 
-            ngx_log_debug1(NGX_LOG_DEBUG_HTTP, c->log, 0,
+            ngx_log_debug2(NGX_LOG_DEBUG_HTTP, c->log, 0,
                            "http no buffered client request body "
-                           "request_length: %O", r->request_length);
+                           "request_length: %O, rest: %z",
+                           r->request_length, rb->rest);
 
             if (rb->rest == 0) {
                 break;

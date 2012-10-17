@@ -1540,10 +1540,6 @@ ngx_http_upstream_send_non_buffered_request(ngx_http_request_t *r,
 
         if (u->request_sent && rb && rb->rest) {
             c->log->action = "reading no buffered request body from client";
-
-            rb->bufs = NULL;
-            rb->buf = NULL;
-            rb->last_out = &rb->bufs;
             rest = rb->rest;
 
             rc = ngx_http_do_read_non_buffered_client_request_body(r);
@@ -1573,6 +1569,25 @@ ngx_http_upstream_send_non_buffered_request(ngx_http_request_t *r,
 
         c->log->action = "sending no buffered request to upstream";
 
+#if 1
+        ngx_buf_t   *buf;
+        ngx_chain_t *cl;
+
+        for (cl = u->request_bufs; cl; cl = cl->next) {
+            buf = cl->buf;
+            ngx_log_debug3(NGX_LOG_DEBUG_HTTP, c->log, 0,
+                           "http upstream before out bufs: p=%p, s=%d, size=%uO",
+                           buf, ngx_buf_special(buf), ngx_buf_size(buf));
+        }
+
+        for (cl = rb->bufs; cl; cl = cl->next) {
+            buf = cl->buf;
+            ngx_log_debug3(NGX_LOG_DEBUG_HTTP, c->log, 0,
+                           "http upstream before2 out bufs: p=%p, s=%d, size=%uO",
+                           buf, ngx_buf_special(buf), ngx_buf_size(buf));
+        }
+
+#endif
         if (u->output_filter(u->output_filter_ctx, rb->bufs) != NGX_OK) {
             ngx_http_upstream_finalize_request(r, u,
                 NGX_HTTP_INTERNAL_SERVER_ERROR);
@@ -1581,9 +1596,6 @@ ngx_http_upstream_send_non_buffered_request(ngx_http_request_t *r,
         }
 
 #if 1
-        ngx_buf_t   *buf;
-        ngx_chain_t *cl;
-
         for (cl = u->request_bufs; cl; cl = cl->next) {
             buf = cl->buf;
             ngx_log_debug3(NGX_LOG_DEBUG_HTTP, c->log, 0,
@@ -1617,6 +1629,11 @@ ngx_http_upstream_send_non_buffered_request(ngx_http_request_t *r,
 #endif
 
         u->request_sent = 1;
+
+        rb->bufs = NULL;
+        rb->buf = NULL;
+        rb->last_out = &rb->bufs;
+        u->request_bufs = NULL;
 
         if (rc == NGX_ERROR) {
 
