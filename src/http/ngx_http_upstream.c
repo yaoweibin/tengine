@@ -1538,7 +1538,17 @@ ngx_http_upstream_send_non_buffered_request(ngx_http_request_t *r,
 
     for ( ;; ) {
 
-        if (u->request_sent && rb && rb->rest) {
+        if (rb == NULL) {
+
+            c->log->action = "sending no buffered request to upstream";
+
+            rc = ngx_output_chain(&u->output,
+                                  u->request_sent ? NULL : u->request_bufs);
+
+            goto send_done;
+        }
+
+        if (u->request_sent && rb->rest) {
             c->log->action = "reading no buffered request body from client";
             rest = rb->rest;
 
@@ -1628,12 +1638,14 @@ ngx_http_upstream_send_non_buffered_request(ngx_http_request_t *r,
         }
 #endif
 
-        u->request_sent = 1;
-
         rb->bufs = NULL;
         rb->buf = NULL;
         rb->last_out = &rb->bufs;
         u->request_bufs = NULL;
+
+send_done:
+
+        u->request_sent = 1;
 
         if (rc == NGX_ERROR) {
 
