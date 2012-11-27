@@ -1775,6 +1775,7 @@ ngx_http_upstream_check_clean_event(ngx_http_upstream_check_peer_t *peer)
                        peer->index, c->fd);
 
         ngx_close_connection(c);
+        peer->pc.connection = NULL;
     }
 
     if (peer->check_timeout_ev.timer_set) {
