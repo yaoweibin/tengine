@@ -360,6 +360,10 @@ HTTP_SSI_DEPS=src/http/modules/ngx_http_ssi_filter_module.h
 HTTP_SSI_SRCS=src/http/modules/ngx_http_ssi_filter_module.c
 
 
+HTTP_ESI_FILTER_MODULE=ngx_http_esi_filter_module
+HTTP_ESI_SRCS=src/http/modules/ngx_http_esi_filter_module.c
+
+
 HTTP_XSLT_FILTER_MODULE=ngx_http_xslt_filter_module
 HTTP_XSLT_SRCS=src/http/modules/ngx_http_xslt_filter_module.c
 

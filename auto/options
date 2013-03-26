@@ -159,6 +159,7 @@ HTTP_CHARSET=YES
 HTTP_GZIP=YES
 HTTP_SSL=YES
 HTTP_SSI=YES
+HTTP_ESI=NO
 HTTP_POSTPONE=NO
 HTTP_REALIP=NO
 HTTP_XSLT=NO
@@ -210,6 +211,7 @@ HTTP_UPSTREAM_KEEPALIVE=YES
 HTTP_STUB_STATUS=YES
 
 # shared modules
+HTTP_ESI_SHARED=NO
 HTTP_XSLT_SHARED=NO
 HTTP_IMAGE_FILTER_SHARED=NO
 HTTP_SUB_SHARED=NO
@@ -377,8 +379,10 @@ do
 
         --with-http_ssl_module)                    HTTP_SSL=YES                      ;;
         --with-http_realip_module)                 HTTP_REALIP=YES                   ;;
-        --with-http_addition_module)               HTTP_ADDITION=YES
-                                                   HTTP_ADDITION_SHARED=NO           ;;
+        --with-http_esi_module)                    HTTP_ESI=YES
+                                                   HTTP_ESI_SHARED=NO                ;;
+        --with-http_addition_module)               HTTP_ADDTION=YES
+                                                   HTTP_ADDTION_SHARED=NO            ;;
         --with-http_xslt_module)                   HTTP_XSLT=YES
                                                    HTTP_XSLT_SHARED=NO               ;;
         --with-http_image_filter_module)           HTTP_IMAGE_FILTER=YES
@@ -406,6 +410,8 @@ do
                                                    HTTP_SYSGUARD_SHARED=NO           ;;
         --with-http_upstream_check_module)         HTTP_UPSTREAM_CHECK=YES           ;;
 
+        --with-http_esi_module=shared)             HTTP_ESI_SHARED=YES
+                                                   HTTP_ESI=NO                       ;;
         --with-http_addition_module=shared)        HTTP_ADDITION_SHARED=YES
                                                    HTTP_ADDITION=NO                  ;;
         --with-http_xslt_module=shared)            HTTP_XSLT_SHARED=YES
@@ -479,6 +485,7 @@ do
         --without-http_charset_module)   HTTP_CHARSET=NO            ;;
         --without-http_gzip_module)      HTTP_GZIP=NO               ;;
         --without-http_ssi_module)       HTTP_SSI=NO                ;;
+        --without-http_esi_module)       HTTP_ESI=NO                ;;
         --without-http_ssl_module)       HTTP_SSL=NO                ;;
         --without-http_userid_module)    HTTP_USERID=NO             ;;
         --without-http_footer_module)    HTTP_FOOTER=NO             ;;
@@ -641,6 +648,7 @@ cat << END
   --without-dso                      disable dso module load
 
   --with-http_realip_module          enable ngx_http_realip_module
+  --with-http_esi_module             enable ngx_http_esi_filter_module
   --with-http_addition_module        enable ngx_http_addition_filter_module
   --with-http_xslt_module            enable ngx_http_xslt_filter_module
   --with-http_image_filter_module    enable ngx_http_image_filter_module
@@ -657,6 +665,7 @@ cat << END
   --with-http_degradation_module     enable ngx_http_degradation_module
   --with-http_sysguard_module        enable ngx_http_sysguard_module
 
+  --with-http_esi_module=shared      enable ngx_http_esi_filter_module (shared)
   --with-http_addition_module=shared enable ngx_http_addition_filter_module (shared)
   --with-http_xslt_module=shared     enable ngx_http_xslt_filter_module (shared)
   --with-http_image_filter_module=shared
