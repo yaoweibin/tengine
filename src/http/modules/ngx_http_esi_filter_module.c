@@ -4,6 +4,10 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 
+
+#define NGX_HTTP_ESI_COMMAND_LEN 32
+#define NGX_HTTP_ESI_PARAM_LEN   32
+
 typedef struct {
     ngx_buf_t                *buf;
 
@@ -24,6 +28,12 @@ typedef struct {
 
     size_t                    value_len;
 
+    ngx_uint_t                key;
+    ngx_str_t                 command;
+    ngx_array_t               params;
+    ngx_table_elt_t          *param;
+
+    void                     *value_buf;
     ngx_str_t                 errmsg;
     ngx_http_request_t       *wait;
 
@@ -48,9 +58,9 @@ typedef struct {
 typedef enum {
     esi_start_state = 0,
     esi_tag_state,
-    esi_comment0_state,
-    esi_comment1_state,
-    esi_sharp_state,
+    esi_tag_e_state,
+    esi_tag_s_state,
+    esi_tag_colon_state,
     esi_precommand_state,
     esi_command_state,
     esi_preparam_state,
@@ -61,11 +71,9 @@ typedef enum {
     esi_quoted_value_state,
     esi_quoted_symbol_state,
     esi_postparam_state,
-    esi_comment_end0_state,
-    esi_comment_end1_state,
+    esi_tag_end_state,
     esi_error_state,
-    esi_error_end0_state,
-    esi_error_end1_state
+    esi_error_end_state,
 } ngx_http_esi_state_e;
 
 
@@ -169,13 +177,15 @@ static ngx_int_t
 ngx_http_esi_header_filter(ngx_http_request_t *r)
 {
     ngx_http_esi_ctx_t       *ctx;
-    ngx_http_esi_loc_conf_t  *slcf;
+    ngx_http_esi_loc_conf_t  *elcf;
 
-    slcf = ngx_http_get_module_loc_conf(r, ngx_http_esi_filter_module);
+    elcf = ngx_http_get_module_loc_conf(r, ngx_http_esi_filter_module);
 
-    if (!slcf->enable
+    if (!elcf->enable
         || r->headers_out.content_length_n == 0
-        || ngx_http_test_content_type(r, &slcf->types) == NULL)
+        || (r->headers_out.content_encoding
+            && r->headers_out.content_encoding->value.len)
+        || ngx_http_test_content_type(r, &elcf->types) == NULL)
     {
         return ngx_http_next_header_filter(r);
     }
@@ -187,7 +197,7 @@ ngx_http_esi_header_filter(ngx_http_request_t *r)
 
     ngx_http_set_ctx(r, ctx, ngx_http_esi_filter_module);
 
-    ctx->value_len = slcf->value_len;
+    ctx->value_len = elcf->value_len;
     ctx->last_out = &ctx->out;
 
     ctx->output = 1;
@@ -211,7 +221,7 @@ ngx_http_esi_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     ngx_buf_t                 *b;
     ngx_chain_t               *cl;
     ngx_http_esi_ctx_t        *ctx;
-    ngx_http_esi_loc_conf_t   *slcf;
+    ngx_http_esi_loc_conf_t   *elcf;
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_esi_filter_module);
 
@@ -235,7 +245,7 @@ ngx_http_esi_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "http esi filter \"%V?%V\"", &r->uri, &r->args);
 
-    slcf = ngx_http_get_module_loc_conf(r, ngx_http_esi_filter_module);
+    elcf = ngx_http_get_module_loc_conf(r, ngx_http_esi_filter_module);
 
     while (ctx->in || ctx->buf) {
 
@@ -405,7 +415,7 @@ ngx_http_esi_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 
             /*esi_error:*/
 
-            if (slcf->silent_errors) {
+            if (elcf->silent_errors) {
                 continue;
             }
 
@@ -472,7 +482,7 @@ ngx_http_esi_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
             b->last_buf = ctx->buf->last_buf;
             b->shadow = ctx->buf;
 
-            if (slcf->ignore_recycled_buffers == 0)  {
+            if (elcf->ignore_recycled_buffers == 0)  {
                 b->recycled = ctx->buf->recycled;
             }
         }
@@ -569,6 +579,529 @@ ngx_http_esi_buffered(ngx_http_request_t *r, ngx_http_esi_ctx_t *ctx)
 static ngx_int_t
 ngx_http_esi_parse(ngx_http_request_t *r, ngx_http_esi_ctx_t *ctx)
 {
+    u_char                *p, *value, *last, *copy_end, ch;
+    size_t                 looked;
+    ngx_http_esi_state_e   state;
+
+    state = ctx->state;
+    looked = ctx->looked;
+    last = ctx->buf->last;
+    copy_end = ctx->copy_end;
+
+    for (p = ctx->pos; p < last; p++) {
+
+        ch = *p;
+
+        if (state == esi_start_state) {
+
+            /* the tight loop */
+
+            for ( ;; ) {
+                if (ch == '<') {
+                    copy_end = p;
+                    looked = 1;
+                    state = esi_tag_state;
+
+                    goto tag_started;
+                }
+
+                if (++p == last) {
+                    break;
+                }
+
+                ch = *p;
+            }
+
+            ctx->state = state;
+            ctx->pos = p;
+            ctx->looked = looked;
+            ctx->copy_end = p;
+
+            if (ctx->copy_start == NULL) {
+                ctx->copy_start = ctx->buf->pos;
+            }
+
+            return NGX_AGAIN;
+
+        tag_started:
+
+            continue;
+        }
+
+        switch (state) {
+
+        case esi_start_state:
+            /* not reached */
+            break;
+
+        case esi_tag_state:
+            switch (ch) {
+            case 'e':
+                looked = 2;
+                state = esi_tag_e_state;
+                break;
+
+            case '<':
+                copy_end = p;
+                break;
+
+            default:
+                copy_end = p;
+                looked = 0;
+                state = esi_start_state;
+                break;
+            }
+
+            break;
+
+        case esi_tag_e_state:
+            switch (ch) {
+            case 's':
+                looked = 3;
+                state = esi_tag_s_state;
+                break;
+
+            case '<':
+                copy_end = p;
+                looked = 1;
+                state = esi_tag_state;
+                break;
+
+            default:
+                copy_end = p;
+                looked = 0;
+                state = esi_start_state;
+                break;
+            }
+
+            break;
+
+        case esi_tag_s_state:
+            switch (ch) {
+            case 'i':
+                looked = 4;
+                state = esi_tag_colon_state;
+                break;
+
+            case '<':
+                copy_end = p;
+                looked = 1;
+                state = esi_tag_state;
+                break;
+
+            default:
+                copy_end = p;
+                looked = 0;
+                state = esi_start_state;
+                break;
+            }
+
+            break;
+
+        case esi_tag_colon_state:
+            switch (ch) {
+            case ':':
+                if (p - ctx->pos < 4) {
+                    ctx->saved = 0;
+                }
+                looked = 0;
+                state = esi_precommand_state;
+                break;
+
+            case '<':
+                copy_end = p;
+                looked = 1;
+                state = esi_tag_state;
+                break;
+
+            default:
+                copy_end = p;
+                looked = 0;
+                state = esi_start_state;
+                break;
+            }
+
+            break;
+
+        case esi_precommand_state:
+            switch (ch) {
+            case ' ':
+            case CR:
+            case LF:
+            case '\t':
+                break;
+
+            default:
+                ctx->command.len = 1;
+                ctx->command.data = ngx_pnalloc(r->pool,
+                                                NGX_HTTP_ESI_COMMAND_LEN);
+                if (ctx->command.data == NULL) {
+                    return NGX_ERROR;
+                }
+
+                ctx->command.data[0] = ch;
+
+                state = esi_command_state;
+                break;
+            }
+
+            break;
+
+        case esi_command_state:
+            switch (ch) {
+            case ' ':
+            case CR:
+            case LF:
+            case '\t':
+                state = esi_preparam_state;
+                break;
+
+            case '/':
+                state = esi_tag_end_state;
+                break;
+
+            default:
+                if (ctx->command.len == NGX_HTTP_ESI_COMMAND_LEN) {
+                    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                                  "the \"%V%c...\" ESI command is too long",
+                                  &ctx->command, ch);
+
+                    state = esi_error_state;
+                    break;
+                }
+
+                ctx->command.data[ctx->command.len++] = ch;
+            }
+
+            break;
+
+        case esi_preparam_state:
+            switch (ch) {
+            case ' ':
+            case CR:
+            case LF:
+            case '\t':
+                break;
+
+            case '/':
+                state = esi_tag_end_state;
+                break;
+
+            default:
+                ctx->param = ngx_array_push(&ctx->params);
+                if (ctx->param == NULL) {
+                    return NGX_ERROR;
+                }
+
+                ctx->param->key.len = 1;
+                ctx->param->key.data = ngx_pnalloc(r->pool,
+                                                   NGX_HTTP_ESI_PARAM_LEN);
+                if (ctx->param->key.data == NULL) {
+                    return NGX_ERROR;
+                }
+
+                ctx->param->key.data[0] = ch;
+
+                ctx->param->value.len = 0;
+
+                if (ctx->value_buf == NULL) {
+                    ctx->param->value.data = ngx_pnalloc(r->pool,
+                                                         ctx->value_len + 1);
+                    if (ctx->param->value.data == NULL) {
+                        return NGX_ERROR;
+                    }
+
+                } else {
+                    ctx->param->value.data = ctx->value_buf;
+                }
+
+                state = esi_param_state;
+                break;
+            }
+
+            break;
+
+        case esi_param_state:
+            switch (ch) {
+            case ' ':
+            case CR:
+            case LF:
+            case '\t':
+                state = esi_preequal_state;
+                break;
+
+            case '=':
+                state = esi_prevalue_state;
+                break;
+
+            case '/':
+                state = esi_error_end_state;
+
+                ctx->param->key.data[ctx->param->key.len++] = ch;
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                              "invalid \"%V\" parameter in \"%V\" ESI command",
+                              &ctx->param->key, &ctx->command);
+                break;
+
+            default:
+                if (ctx->param->key.len == NGX_HTTP_ESI_PARAM_LEN) {
+                    state = esi_error_state;
+                    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                                  "too long \"%V%c...\" parameter in "
+                                  "\"%V\" ESI command",
+                                  &ctx->param->key, ch, &ctx->command);
+                    break;
+                }
+
+                ctx->param->key.data[ctx->param->key.len++] = ch;
+            }
+
+            break;
+
+        case esi_preequal_state:
+            switch (ch) {
+            case ' ':
+            case CR:
+            case LF:
+            case '\t':
+                break;
+
+            case '=':
+                state = esi_prevalue_state;
+                break;
+
+            default:
+                if (ch == '/') {
+                    state = esi_error_end_state;
+                } else {
+                    state = esi_error_state;
+                }
+
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                              "unexpected \"%c\" symbol after \"%V\" "
+                              "parameter in \"%V\" ESI command",
+                              ch, &ctx->param->key, &ctx->command);
+                break;
+            }
+
+            break;
+
+        case esi_prevalue_state:
+            switch (ch) {
+            case ' ':
+            case CR:
+            case LF:
+            case '\t':
+                break;
+
+            case '"':
+                state = esi_double_quoted_value_state;
+                break;
+
+            case '\'':
+                state = esi_quoted_value_state;
+                break;
+
+            default:
+                if (ch == '/') {
+                    state = esi_error_end_state;
+                } else {
+                    state = esi_error_state;
+                }
+
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                              "unexpected \"%c\" symbol before value of "
+                              "\"%V\" parameter in \"%V\" ESI command",
+                              ch, &ctx->param->key, &ctx->command);
+                break;
+            }
+
+            break;
+
+        case esi_double_quoted_value_state:
+            switch (ch) {
+            case '"':
+                state = esi_postparam_state;
+                break;
+
+            case '\\':
+                ctx->saved_state = esi_double_quoted_value_state;
+                state = esi_quoted_symbol_state;
+
+                /* fall through */
+
+            default:
+                if (ctx->param->value.len == ctx->value_len) {
+                    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                                  "too long \"%V%c...\" value of \"%V\" "
+                                  "parameter in \"%V\" ESI command",
+                                  &ctx->param->value, ch, &ctx->param->key,
+                                  &ctx->command);
+                    state = esi_error_state;
+                    break;
+                }
+
+                ctx->param->value.data[ctx->param->value.len++] = ch;
+            }
+
+            break;
+
+        case esi_quoted_value_state:
+            switch (ch) {
+            case '\'':
+                state = esi_postparam_state;
+                break;
+
+            case '\\':
+                ctx->saved_state = esi_quoted_value_state;
+                state = esi_quoted_symbol_state;
+
+                /* fall through */
+
+            default:
+                if (ctx->param->value.len == ctx->value_len) {
+                    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                                  "too long \"%V%c...\" value of \"%V\" "
+                                  "parameter in \"%V\" ESI command",
+                                  &ctx->param->value, ch, &ctx->param->key,
+                                  &ctx->command);
+                    state = esi_error_state;
+                    break;
+                }
+
+                ctx->param->value.data[ctx->param->value.len++] = ch;
+            }
+
+            break;
+
+        case esi_quoted_symbol_state:
+            state = ctx->saved_state;
+
+            if (ctx->param->value.len == ctx->value_len) {
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                              "too long \"%V%c...\" value of \"%V\" "
+                              "parameter in \"%V\" ESI command",
+                              &ctx->param->value, ch, &ctx->param->key,
+                              &ctx->command);
+                state = esi_error_state;
+                break;
+            }
+
+            ctx->param->value.data[ctx->param->value.len++] = ch;
+
+            break;
+
+        case esi_postparam_state:
+
+            if (ctx->param->value.len + 1 < ctx->value_len / 2) {
+                value = ngx_pnalloc(r->pool, ctx->param->value.len + 1);
+                if (value == NULL) {
+                    return NGX_ERROR;
+                }
+
+                ngx_memcpy(value, ctx->param->value.data,
+                           ctx->param->value.len);
+
+                ctx->value_buf = ctx->param->value.data;
+                ctx->param->value.data = value;
+
+            } else {
+                ctx->value_buf = NULL;
+            }
+
+            switch (ch) {
+            case ' ':
+            case CR:
+            case LF:
+            case '\t':
+                state = esi_preparam_state;
+                break;
+
+            case '/':
+                state = esi_tag_end_state;
+                break;
+
+            default:
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                              "unexpected \"%c\" symbol after \"%V\" value "
+                              "of \"%V\" parameter in \"%V\" ESI command",
+                              ch, &ctx->param->value, &ctx->param->key,
+                              &ctx->command);
+                state = esi_error_state;
+                break;
+            }
+
+            break;
+
+        case esi_tag_end_state:
+            switch (ch) {
+            case '>':
+                ctx->state = esi_start_state;
+                ctx->pos = p + 1;
+                ctx->looked = looked;
+                ctx->copy_end = copy_end;
+
+                if (ctx->copy_start == NULL && copy_end) {
+                    ctx->copy_start = ctx->buf->pos;
+                }
+
+                return NGX_OK;
+
+            default:
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                              "unexpected \"%c\" symbol in \"%V\" ESI command",
+                              ch, &ctx->command);
+                state = esi_error_state;
+                break;
+            }
+
+            break;
+
+        case esi_error_state:
+            switch (ch) {
+            case '/':
+                state = esi_error_end_state;
+                break;
+
+            default:
+                break;
+            }
+
+            break;
+
+        case esi_error_end_state:
+            switch (ch) {
+            case '>':
+                ctx->state = esi_start_state;
+                ctx->pos = p + 1;
+                ctx->looked = looked;
+                ctx->copy_end = copy_end;
+
+                if (ctx->copy_start == NULL && copy_end) {
+                    ctx->copy_start = ctx->buf->pos;
+                }
+
+                return NGX_ERROR;
+
+            default:
+                state = esi_error_state;
+                break;
+            }
+
+            break;
+        }
+    }
+
+    ctx->state = state;
+    ctx->pos = p;
+    ctx->looked = looked;
+
+    ctx->copy_end = (state == esi_start_state) ? p : copy_end;
+
+    if (ctx->copy_start == NULL && ctx->copy_end) {
+        ctx->copy_start = ctx->buf->pos;
+    }
+
     return NGX_AGAIN;
 }
 
@@ -616,10 +1149,10 @@ ngx_http_esi_include(ngx_http_request_t *r, ngx_http_esi_ctx_t *ctx,
 static void *
 ngx_http_esi_create_loc_conf(ngx_conf_t *cf)
 {
-    ngx_http_esi_loc_conf_t  *slcf;
+    ngx_http_esi_loc_conf_t  *elcf;
 
-    slcf = ngx_pcalloc(cf->pool, sizeof(ngx_http_esi_loc_conf_t));
-    if (slcf == NULL) {
+    elcf = ngx_pcalloc(cf->pool, sizeof(ngx_http_esi_loc_conf_t));
+    if (elcf == NULL) {
         return NULL;
     }
 
@@ -630,13 +1163,13 @@ ngx_http_esi_create_loc_conf(ngx_conf_t *cf)
      *     conf->types_keys = NULL;
      */
 
-    slcf->enable = NGX_CONF_UNSET;
-    slcf->silent_errors = NGX_CONF_UNSET;
-    slcf->ignore_recycled_buffers = NGX_CONF_UNSET;
+    elcf->enable = NGX_CONF_UNSET;
+    elcf->silent_errors = NGX_CONF_UNSET;
+    elcf->ignore_recycled_buffers = NGX_CONF_UNSET;
 
-    slcf->value_len = NGX_CONF_UNSET_SIZE;
+    elcf->value_len = NGX_CONF_UNSET_SIZE;
 
-    return slcf;
+    return elcf;
 }
 
 
