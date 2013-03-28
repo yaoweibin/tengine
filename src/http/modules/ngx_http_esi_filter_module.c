@@ -4,9 +4,12 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 
-
+#define NGX_HTTP_ESI_MAX_PARAMS  16
 #define NGX_HTTP_ESI_COMMAND_LEN 32
 #define NGX_HTTP_ESI_PARAM_LEN   32
+
+#define NGX_HTTP_ESI_ERROR        1
+
 
 typedef struct {
     ngx_buf_t                *buf;
@@ -375,6 +378,8 @@ ngx_http_esi_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                         cl->next = NULL;
 
                         b = NULL;
+
+                        /* TODO: save the chain */
                     }
 
                     ctx->saved = 0;
@@ -394,10 +399,12 @@ ngx_http_esi_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                 continue;
             }
 
-
             b = NULL;
 
             if (rc == NGX_OK) {
+
+                /* TODO: find the command */
+                /* TODO: command verification */
 
                 rc = ngx_http_esi_include(r, ctx, NULL);
 
@@ -411,9 +418,11 @@ ngx_http_esi_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                 }
             }
 
+            goto esi_error;
+
             /* rc == NGX_HTTP_ESI_ERROR */
 
-            /*esi_error:*/
+esi_error:
 
             if (elcf->silent_errors) {
                 continue;
@@ -1081,7 +1090,7 @@ ngx_http_esi_parse(ngx_http_request_t *r, ngx_http_esi_ctx_t *ctx)
                     ctx->copy_start = ctx->buf->pos;
                 }
 
-                return NGX_ERROR;
+                return NGX_HTTP_ESI_ERROR;
 
             default:
                 state = esi_error_state;
