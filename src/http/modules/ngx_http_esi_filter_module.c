@@ -4,11 +4,13 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 
+
 #define NGX_HTTP_ESI_MAX_PARAMS  16
 #define NGX_HTTP_ESI_COMMAND_LEN 32
 #define NGX_HTTP_ESI_PARAM_LEN   32
+#define NGX_HTTP_ESI_PARAMS_N    4
 
-#define NGX_HTTP_ESI_ERROR        1
+#define NGX_HTTP_ESI_ERROR       1
 
 
 typedef struct {
@@ -35,12 +37,12 @@ typedef struct {
     ngx_str_t                 command;
     ngx_array_t               params;
     ngx_table_elt_t          *param;
+    ngx_table_elt_t           params_array[NGX_HTTP_ESI_PARAMS_N];
 
     void                     *value_buf;
     ngx_str_t                 errmsg;
     ngx_http_request_t       *wait;
 
-    unsigned                  block:1;
     unsigned                  output:1;
 } ngx_http_esi_ctx_t;
 
@@ -80,6 +82,15 @@ typedef enum {
 } ngx_http_esi_state_e;
 
 
+typedef ngx_int_t (*ngx_http_esi_command_pt) (ngx_http_request_t *r,
+    ngx_http_esi_ctx_t *ctx, ngx_str_t **);
+
+typedef struct {
+    ngx_str_t                 name;
+    ngx_http_esi_command_pt   handler;
+} ngx_http_esi_command_t;
+
+
 static ngx_int_t ngx_http_esi_output(ngx_http_request_t *r,
     ngx_http_esi_ctx_t *ctx);
 static void ngx_http_esi_buffered(ngx_http_request_t *r,
@@ -87,6 +98,8 @@ static void ngx_http_esi_buffered(ngx_http_request_t *r,
 static ngx_int_t ngx_http_esi_parse(ngx_http_request_t *r,
     ngx_http_esi_ctx_t *ctx);
 
+static ngx_http_esi_command_t *ngx_http_esi_find_command(
+    ngx_http_esi_ctx_t *ctx);
 static ngx_int_t ngx_http_esi_include(ngx_http_request_t *r,
     ngx_http_esi_ctx_t *ctx, ngx_str_t **params);
 
@@ -176,6 +189,11 @@ static ngx_http_output_body_filter_pt    ngx_http_next_body_filter;
 
 static u_char ngx_http_esi_string[] = "<esi";
 
+static ngx_http_esi_command_t  ngx_http_esi_commands[] = {
+    { ngx_string("include"), ngx_http_esi_include },
+    { ngx_null_string, NULL }
+};
+
 static ngx_int_t
 ngx_http_esi_header_filter(ngx_http_request_t *r)
 {
@@ -203,6 +221,13 @@ ngx_http_esi_header_filter(ngx_http_request_t *r)
     ctx->value_len = elcf->value_len;
     ctx->last_out = &ctx->out;
 
+    ctx->params.elts = ctx->params_array;
+    ctx->params.size = sizeof(ngx_table_elt_t);
+    ctx->params.nalloc = NGX_HTTP_ESI_PARAMS_N;
+    ctx->params.pool = r->pool;
+
+    ngx_str_set(&ctx->errmsg,
+                "[an error occurred while processing the directive]");
     ctx->output = 1;
 
     r->filter_need_in_memory = 1;
@@ -224,6 +249,7 @@ ngx_http_esi_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     ngx_buf_t                 *b;
     ngx_chain_t               *cl;
     ngx_http_esi_ctx_t        *ctx;
+    ngx_http_esi_command_t    *cmd;
     ngx_http_esi_loc_conf_t   *elcf;
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_esi_filter_module);
@@ -338,7 +364,8 @@ ngx_http_esi_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                         cl->buf = b;
                     }
 
-                    ngx_memcpy(b, ctx->buf, sizeof(ngx_buf_t));
+                    //ngx_memcpy(b, ctx->buf, sizeof(ngx_buf_t));
+                    b->memory = 1;
 
                     b->pos = ctx->copy_start;
                     b->last = ctx->copy_end;
@@ -346,14 +373,17 @@ ngx_http_esi_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                     b->last_buf = 0;
                     b->recycled = 0;
 
+                    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                                   "out buf: %*s", ngx_buf_size(b), b->pos);
+
                     cl->next = NULL;
                     *ctx->last_out = cl;
                     ctx->last_out = &cl->next;
 
                 } else {
-                    if (ctx->block
-                        && ctx->saved + (ctx->copy_end - ctx->copy_start))
-                    {
+
+                    if (ctx->saved + (ctx->copy_end - ctx->copy_start)) {
+
                         b = ngx_create_temp_buf(r->pool,
                                ctx->saved + (ctx->copy_end - ctx->copy_start));
 
@@ -403,7 +433,18 @@ ngx_http_esi_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 
             if (rc == NGX_OK) {
 
-                /* TODO: find the command */
+                cmd = ngx_http_esi_find_command(ctx);
+                if (cmd == NULL) {
+                    goto esi_error;
+                }
+
+                if (ctx->params.nelts > NGX_HTTP_ESI_MAX_PARAMS) {
+                    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                                  "too many ESI command parameters: \"%V\"",
+                                  &ctx->command);
+                    goto esi_error;
+                }
+
                 /* TODO: command verification */
 
                 rc = ngx_http_esi_include(r, ctx, NULL);
@@ -417,8 +458,6 @@ ngx_http_esi_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                     return rc;
                 }
             }
-
-            goto esi_error;
 
             /* rc == NGX_HTTP_ESI_ERROR */
 
@@ -749,6 +788,8 @@ ngx_http_esi_parse(ngx_http_request_t *r, ngx_http_esi_ctx_t *ctx)
                 }
 
                 ctx->command.data[0] = ch;
+
+                ctx->params.nelts = 0;
 
                 state = esi_command_state;
                 break;
@@ -1115,10 +1156,45 @@ ngx_http_esi_parse(ngx_http_request_t *r, ngx_http_esi_ctx_t *ctx)
 }
 
 
+static ngx_http_esi_command_t *
+ngx_http_esi_find_command(ngx_http_esi_ctx_t *ctx)
+{
+    ngx_http_esi_command_t *cmd;
+
+    for (cmd = ngx_http_esi_commands; cmd->handler; cmd++) {
+        if (cmd == NULL || cmd->name.data == NULL) {
+            break;
+        }
+
+        if (ctx->command.len != cmd->name.len) {
+            continue;
+        }
+
+        if (ngx_strncmp(ctx->command.data, cmd->name.data,
+                        cmd->name.len) == 0) {
+            return cmd;
+        }
+    }
+
+    return NULL;
+}
+
+
 static ngx_int_t
 ngx_http_esi_include(ngx_http_request_t *r, ngx_http_esi_ctx_t *ctx,
     ngx_str_t **params)
 {
+    ngx_uint_t       i;
+    ngx_table_elt_t *param;
+ 
+    param = ctx->params.elts;
+    for (i = 0; i < ctx->params.nelts; i++) {
+        ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                       "esi include: praram[\"%V\"] = %V", &param[i].key, &param[i].value);
+    }
+
+    /* TODO: subrequest */
+#if 0
     ngx_str_t                    uri, args;
     ngx_uint_t                   flags;
     ngx_http_request_t          *sr;
@@ -1150,6 +1226,7 @@ ngx_http_esi_include(ngx_http_request_t *r, ngx_http_esi_ctx_t *ctx,
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "can only wait for one subrequest at a time");
     }
+#endif
 
     return NGX_OK;
 }
