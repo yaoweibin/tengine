@@ -42,8 +42,6 @@ typedef struct {
     void                     *value_buf;
     ngx_str_t                 errmsg;
     ngx_http_request_t       *wait;
-
-    unsigned                  output:1;
 } ngx_http_esi_ctx_t;
 
 
@@ -228,7 +226,6 @@ ngx_http_esi_header_filter(ngx_http_request_t *r)
 
     ngx_str_set(&ctx->errmsg,
                 "[an error occurred while processing the directive]");
-    ctx->output = 1;
 
     r->filter_need_in_memory = 1;
 
@@ -274,6 +271,32 @@ ngx_http_esi_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "http esi filter \"%V?%V\"", &r->uri, &r->args);
 
+    if (ctx->wait) {
+
+        if (r != r->connection->data) {
+            ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                           "http esi filter wait \"%V?%V\" non-active",
+                           &ctx->wait->uri, &ctx->wait->args);
+
+            return NGX_AGAIN;
+        }
+
+        if (ctx->wait->done) {
+            ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                           "http esi filter wait \"%V?%V\" done",
+                           &ctx->wait->uri, &ctx->wait->args);
+
+            ctx->wait = NULL;
+
+        } else {
+            ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                           "http esi filter wait \"%V?%V\"",
+                           &ctx->wait->uri, &ctx->wait->args);
+
+            return ngx_http_next_body_filter(r, NULL);
+        }
+    }
+
     elcf = ngx_http_get_module_loc_conf(r, ngx_http_esi_filter_module);
 
     while (ctx->in || ctx->buf) {
@@ -308,50 +331,19 @@ ngx_http_esi_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 
             if (ctx->copy_start != ctx->copy_end) {
 
-                if (ctx->output) {
+                ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                               "saved: %d", ctx->saved);
 
-                    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                                   "saved: %d", ctx->saved);
-
-                    if (ctx->saved) {
-
-                        if (ctx->free) {
-                            cl = ctx->free;
-                            ctx->free = ctx->free->next;
-                            b = cl->buf;
-                            ngx_memzero(b, sizeof(ngx_buf_t));
-
-                        } else {
-                            b = ngx_calloc_buf(r->pool);
-                            if (b == NULL) {
-                                return NGX_ERROR;
-                            }
-
-                            cl = ngx_alloc_chain_link(r->pool);
-                            if (cl == NULL) {
-                                return NGX_ERROR;
-                            }
-
-                            cl->buf = b;
-                        }
-
-                        b->memory = 1;
-                        b->pos = ngx_http_esi_string;
-                        b->last = ngx_http_esi_string + ctx->saved;
-
-                        *ctx->last_out = cl;
-                        ctx->last_out = &cl->next;
-
-                        ctx->saved = 0;
-                    }
+                if (ctx->saved) {
 
                     if (ctx->free) {
                         cl = ctx->free;
                         ctx->free = ctx->free->next;
                         b = cl->buf;
+                        ngx_memzero(b, sizeof(ngx_buf_t));
 
                     } else {
-                        b = ngx_alloc_buf(r->pool);
+                        b = ngx_calloc_buf(r->pool);
                         if (b == NULL) {
                             return NGX_ERROR;
                         }
@@ -364,56 +356,50 @@ ngx_http_esi_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                         cl->buf = b;
                     }
 
-                    //ngx_memcpy(b, ctx->buf, sizeof(ngx_buf_t));
                     b->memory = 1;
+                    b->pos = ngx_http_esi_string;
+                    b->last = ngx_http_esi_string + ctx->saved;
 
-                    b->pos = ctx->copy_start;
-                    b->last = ctx->copy_end;
-                    b->shadow = NULL;
-                    b->last_buf = 0;
-                    b->recycled = 0;
-
-                    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                                   "out buf: %*s", ngx_buf_size(b), b->pos);
-
-                    cl->next = NULL;
                     *ctx->last_out = cl;
                     ctx->last_out = &cl->next;
 
-                } else {
-
-                    if (ctx->saved + (ctx->copy_end - ctx->copy_start)) {
-
-                        b = ngx_create_temp_buf(r->pool,
-                               ctx->saved + (ctx->copy_end - ctx->copy_start));
-
-                        if (b == NULL) {
-                            return NGX_ERROR;
-                        }
-
-                        if (ctx->saved) {
-                            b->last = ngx_cpymem(b->pos, ngx_http_esi_string,
-                                                 ctx->saved);
-                        }
-
-                        b->last = ngx_cpymem(b->last, ctx->copy_start,
-                                             ctx->copy_end - ctx->copy_start);
-
-                        cl = ngx_alloc_chain_link(r->pool);
-                        if (cl == NULL) {
-                            return NGX_ERROR;
-                        }
-
-                        cl->buf = b;
-                        cl->next = NULL;
-
-                        b = NULL;
-
-                        /* TODO: save the chain */
-                    }
-
                     ctx->saved = 0;
                 }
+
+                if (ctx->free) {
+                    cl = ctx->free;
+                    ctx->free = ctx->free->next;
+                    b = cl->buf;
+
+                } else {
+                    b = ngx_alloc_buf(r->pool);
+                    if (b == NULL) {
+                        return NGX_ERROR;
+                    }
+
+                    cl = ngx_alloc_chain_link(r->pool);
+                    if (cl == NULL) {
+                        return NGX_ERROR;
+                    }
+
+                    cl->buf = b;
+                }
+
+                ngx_memzero(b, sizeof(ngx_buf_t));
+
+                b->memory = 1;
+                b->pos = ctx->copy_start;
+                b->last = ctx->copy_end;
+                b->shadow = NULL;
+                b->last_buf = 0;
+                b->recycled = 0;
+
+                ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                        "out buf: %*s", ngx_buf_size(b), b->pos);
+
+                cl->next = NULL;
+                *ctx->last_out = cl;
+                ctx->last_out = &cl->next;
             }
 
             if (ctx->state == esi_start_state) {
@@ -446,6 +432,16 @@ ngx_http_esi_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                 }
 
                 /* TODO: command verification */
+
+                if (ctx->out) {
+
+                    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                                   "esi flush");
+
+                    if (ngx_http_esi_output(r, ctx) == NGX_ERROR) {
+                        return NGX_ERROR;
+                    }
+                }
 
                 rc = ngx_http_esi_include(r, ctx, NULL);
 
@@ -1184,8 +1180,13 @@ static ngx_int_t
 ngx_http_esi_include(ngx_http_request_t *r, ngx_http_esi_ctx_t *ctx,
     ngx_str_t **params)
 {
-    ngx_uint_t       i;
-    ngx_table_elt_t *param;
+    u_char                      *dst, *src;
+    size_t                       len;
+    ngx_str_t                   *uri, args;
+    ngx_uint_t                   i;
+    ngx_uint_t                   flags;
+    ngx_table_elt_t             *param;
+    ngx_http_request_t          *sr;
  
     param = ctx->params.elts;
     for (i = 0; i < ctx->params.nelts; i++) {
@@ -1193,28 +1194,39 @@ ngx_http_esi_include(ngx_http_request_t *r, ngx_http_esi_ctx_t *ctx,
                        "esi include: praram[\"%V\"] = %V", &param[i].key, &param[i].value);
     }
 
-    /* TODO: subrequest */
-#if 0
-    ngx_str_t                    uri, args;
-    ngx_uint_t                   flags;
-    ngx_http_request_t          *sr;
-    ngx_http_post_subrequest_t  *psr;
+    uri = &param[0].value;
+    if (uri->len == 0) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "no parameter in \"include\" ESI command");
+        return NGX_HTTP_ESI_ERROR;
+    }
+
+    dst = uri->data;
+    src = uri->data;
+
+    ngx_unescape_uri(&dst, &src, uri->len, NGX_UNESCAPE_URI);
+
+    len = (uri->data + uri->len) - src;
+    if (len) {
+        dst = ngx_movemem(dst, src, len);
+    }
+
+    uri->len = dst - uri->data;
 
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "esi include: \"%V\"", uri);
 
-    ngx_str_null(&uri);
     ngx_str_null(&args);
-    flags = 0;
+    flags = NGX_HTTP_LOG_UNSAFE;
 
-    if (ngx_http_parse_unsafe_uri(r, &uri, &args, &flags) != NGX_OK) {
-        return NGX_ERROR;
+    if (ngx_http_parse_unsafe_uri(r, uri, &args, &flags) != NGX_OK) {
+        return NGX_HTTP_ESI_ERROR;
     }
 
-    psr = NULL;
+    flags = NGX_HTTP_SUBREQUEST_WAITED;
 
-    if (ngx_http_subrequest(r, &uri, &args, &sr, psr, flags) != NGX_OK) {
-        return NGX_ERROR;
+    if (ngx_http_subrequest(r, uri, &args, &sr, NULL, flags) != NGX_OK) {
+        return NGX_HTTP_ESI_ERROR;
     }
 
     if (ctx->wait == NULL) {
@@ -1226,7 +1238,6 @@ ngx_http_esi_include(ngx_http_request_t *r, ngx_http_esi_ctx_t *ctx,
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "can only wait for one subrequest at a time");
     }
-#endif
 
     return NGX_OK;
 }
