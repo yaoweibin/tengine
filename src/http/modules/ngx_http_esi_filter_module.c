@@ -192,6 +192,7 @@ static ngx_http_esi_command_t  ngx_http_esi_commands[] = {
     { ngx_null_string, NULL }
 };
 
+
 static ngx_int_t
 ngx_http_esi_header_filter(ngx_http_request_t *r)
 {
@@ -1222,6 +1223,8 @@ ngx_http_esi_include(ngx_http_request_t *r, ngx_http_esi_ctx_t *ctx,
     if (ngx_http_parse_unsafe_uri(r, uri, &args, &flags) != NGX_OK) {
         return NGX_HTTP_ESI_ERROR;
     }
+
+    /* TODO: add the domain resolver handler */
 
     flags = NGX_HTTP_SUBREQUEST_WAITED;
 
