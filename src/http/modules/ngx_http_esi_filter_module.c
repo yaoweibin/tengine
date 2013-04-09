@@ -50,15 +50,15 @@ typedef struct {
 
 
 typedef struct {
-    ngx_flag_t    enable;
-    ngx_flag_t    silent_errors;
-    ngx_flag_t    ignore_recycled_buffers;
+    ngx_flag_t                enable;
+    ngx_flag_t                silent_errors;
+    ngx_flag_t                ignore_recycled_buffers;
 
-    ngx_hash_t    types;
+    ngx_hash_t                types;
 
-    size_t        value_len;
+    size_t                    value_len;
 
-    ngx_array_t  *types_keys;
+    ngx_array_t              *types_keys;
 } ngx_http_esi_loc_conf_t;
 
 
@@ -282,6 +282,13 @@ ngx_http_esi_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 
     ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "http esi filter \"%V?%V\"", &r->uri, &r->args);
+
+    if (ctx->wait_resolver) {
+        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                       "http esi filter wait for the host \"%V\" resolving",
+                       &ctx->u.host);
+        return NGX_AGAIN;
+    }
 
     if (ctx->wait) {
 
@@ -1210,7 +1217,10 @@ ngx_http_esi_include(ngx_http_request_t *r, ngx_http_esi_ctx_t *ctx,
         return NGX_HTTP_ESI_ERROR;
     }
 
-    if (ctx->u.naddrs == 0) {
+    if (ctx->u.one_addr) {
+        return ngx_http_esi_fetch_resource(r, ctx);
+
+    } else if (ctx->u.naddrs == 0) {
 
         ctx->wait_resolver = 1;
 
@@ -1221,7 +1231,7 @@ ngx_http_esi_include(ngx_http_request_t *r, ngx_http_esi_ctx_t *ctx,
         return ngx_http_esi_fetch_resource(r, ctx);
     }
 
-    return NGX_OK;
+    return NGX_AGAIN;
 }
 
 
@@ -1309,6 +1319,12 @@ ngx_http_esi_parse_url(ngx_url_t *u, ngx_str_t *url, ngx_pool_t *pool)
 
         add = 8;
         port = 443;
+    } else if (url->data[0] == '/') {
+
+        /* The local url */
+        u->one_addr = 1;
+    } else {
+        return NGX_ERROR;
     }
 
     u->url.len = url->len - add;
