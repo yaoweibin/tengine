@@ -108,9 +108,11 @@ static ngx_int_t ngx_http_esi_fetch_resource(ngx_http_request_t *r,
     ngx_http_esi_ctx_t *ctx);
 static ngx_int_t ngx_http_esi_parse_url(ngx_url_t *u, ngx_str_t *url,
     ngx_pool_t *pool);
+#if 0
 static ngx_int_t ngx_http_esi_resolve_host(ngx_http_request_t *r,
     ngx_str_t *host);
 static void ngx_http_esi_resolve_callback(ngx_resolver_ctx_t *ctx);
+#endif
 
 static void *ngx_http_esi_create_loc_conf(ngx_conf_t *cf);
 static char *ngx_http_esi_merge_loc_conf(ngx_conf_t *cf,
@@ -406,6 +408,7 @@ ngx_http_esi_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 
                 ngx_memzero(b, sizeof(ngx_buf_t));
 
+                /*b->flush = 1;*/
                 b->memory = 1;
                 b->pos = ctx->copy_start;
                 b->last = ctx->copy_end;
@@ -1211,12 +1214,13 @@ ngx_http_esi_include(ngx_http_request_t *r, ngx_http_esi_ctx_t *ctx,
     if (ngx_http_esi_parse_url(&ctx->u, &param[0].value, r->pool) == NGX_ERROR) {
         if (ctx->u.err) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                               "%s in with ESI url \"%V\"", ctx->u.err, &ctx->u.url);
+                          "%s in with ESI url \"%V\"", ctx->u.err, &ctx->u.url);
         }
 
         return NGX_HTTP_ESI_ERROR;
     }
 
+#if 0
     if (ctx->u.one_addr) {
         return ngx_http_esi_fetch_resource(r, ctx);
 
@@ -1228,8 +1232,11 @@ ngx_http_esi_include(ngx_http_request_t *r, ngx_http_esi_ctx_t *ctx,
             return NGX_HTTP_ESI_ERROR;
         }
     } else {
+#endif
         return ngx_http_esi_fetch_resource(r, ctx);
+#if 0
     }
+#endif
 
     return NGX_AGAIN;
 }
@@ -1238,11 +1245,11 @@ ngx_http_esi_include(ngx_http_request_t *r, ngx_http_esi_ctx_t *ctx,
 static ngx_int_t
 ngx_http_esi_fetch_resource(ngx_http_request_t *r, ngx_http_esi_ctx_t *ctx)
 {
-    u_char                      *dst, *src;
-    size_t                       len;
-    ngx_str_t                   *uri, args;
-    ngx_uint_t                   flags;
-    ngx_http_request_t          *sr;
+    u_char              *dst, *src;
+    size_t               len;
+    ngx_str_t           *uri, args;
+    ngx_uint_t           flags;
+    ngx_http_request_t  *sr;
 
     uri = &ctx->u.uri;
     if (uri->len == 0) {
@@ -1323,6 +1330,10 @@ ngx_http_esi_parse_url(ngx_url_t *u, ngx_str_t *url, ngx_pool_t *pool)
 
         /* The local url */
         u->one_addr = 1;
+        u->url = *url;
+        u->uri = *url;
+
+        return NGX_OK;
     } else {
         return NGX_ERROR;
     }
@@ -1373,6 +1384,7 @@ ngx_http_esi_parse_url(ngx_url_t *u, ngx_str_t *url, ngx_pool_t *pool)
 }
 
 
+#if 0
 static ngx_int_t
 ngx_http_esi_resolve_host(ngx_http_request_t *r, ngx_str_t *host)
 {
@@ -1484,6 +1496,7 @@ ngx_http_esi_resolve_callback(ngx_resolver_ctx_t *ctx)
 
     ngx_http_esi_fetch_resource(r, ectx);
 }
+#endif
 
 
 static void *
