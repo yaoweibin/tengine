@@ -453,6 +453,9 @@ ngx_http_esi_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 
                 rc = ngx_http_esi_include(r, ctx, NULL);
 
+                ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                               "esi include rc=%i", rc);
+
                 if (rc == NGX_OK) {
                     continue;
                 }
@@ -680,6 +683,9 @@ ngx_http_esi_parse(ngx_http_request_t *r, ngx_http_esi_ctx_t *ctx)
             continue;
         }
 
+        ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                       "esi parse: %d, ch=%c", state, ch);
+
         switch (state) {
 
         case esi_start_state:
@@ -781,6 +787,10 @@ ngx_http_esi_parse(ngx_http_request_t *r, ngx_http_esi_ctx_t *ctx)
             case CR:
             case LF:
             case '\t':
+                break;
+
+            case '/':
+                state = esi_tag_end_state;
                 break;
 
             default:
