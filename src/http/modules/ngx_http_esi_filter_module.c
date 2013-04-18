@@ -44,8 +44,6 @@ typedef struct {
     ngx_http_request_t       *wait;
 
     ngx_url_t                 u;
-
-    unsigned                  wait_resolver;
 } ngx_http_esi_ctx_t;
 
 
@@ -108,11 +106,6 @@ static ngx_int_t ngx_http_esi_fetch_resource(ngx_http_request_t *r,
     ngx_http_esi_ctx_t *ctx);
 static ngx_int_t ngx_http_esi_parse_url(ngx_url_t *u, ngx_str_t *url,
     ngx_pool_t *pool);
-#if 0
-static ngx_int_t ngx_http_esi_resolve_host(ngx_http_request_t *r,
-    ngx_str_t *host);
-static void ngx_http_esi_resolve_callback(ngx_resolver_ctx_t *ctx);
-#endif
 
 static void *ngx_http_esi_create_loc_conf(ngx_conf_t *cf);
 static char *ngx_http_esi_merge_loc_conf(ngx_conf_t *cf,
@@ -285,13 +278,6 @@ ngx_http_esi_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "http esi filter \"%V?%V\"", &r->uri, &r->args);
 
-    if (ctx->wait_resolver) {
-        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                       "http esi filter wait for the host \"%V\" resolving",
-                       &ctx->u.host);
-        return NGX_AGAIN;
-    }
-
     if (ctx->wait) {
 
         if (r != r->connection->data) {
@@ -417,7 +403,7 @@ ngx_http_esi_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                 b->recycled = 0;
 
                 ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                        "out buf: %*s", ngx_buf_size(b), b->pos);
+                               "out buf: \"%*s\"", ngx_buf_size(b), b->pos);
 
                 cl->next = NULL;
                 *ctx->last_out = cl;
@@ -1202,43 +1188,29 @@ static ngx_int_t
 ngx_http_esi_include(ngx_http_request_t *r, ngx_http_esi_ctx_t *ctx,
     ngx_str_t **params)
 {
-    ngx_uint_t                   i;
-    ngx_table_elt_t             *param;
+    ngx_uint_t        i;
+    ngx_table_elt_t  *param;
  
     param = ctx->params.elts;
     for (i = 0; i < ctx->params.nelts; i++) {
         ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                       "esi include: praram[\"%V\"] = %V", &param[i].key, &param[i].value);
+                       "esi include: praram[\"%V\"] = %V",
+                       &param[i].key,&param[i].value);
     }
 
-    if (ngx_http_esi_parse_url(&ctx->u, &param[0].value, r->pool) == NGX_ERROR) {
+    if (ngx_http_esi_parse_url(&ctx->u, &param[0].value, r->pool)
+        == NGX_ERROR) {
+
         if (ctx->u.err) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                          "%s in with ESI url \"%V\"", ctx->u.err, &ctx->u.url);
+                          "%s in with ESI url \"%V\"",
+                          ctx->u.err, &ctx->u.url);
         }
 
         return NGX_HTTP_ESI_ERROR;
     }
 
-#if 0
-    if (ctx->u.one_addr) {
-        return ngx_http_esi_fetch_resource(r, ctx);
-
-    } else if (ctx->u.naddrs == 0) {
-
-        ctx->wait_resolver = 1;
-
-        if (ngx_http_esi_resolve_host(r, &ctx->u.host) == NGX_ERROR) {
-            return NGX_HTTP_ESI_ERROR;
-        }
-    } else {
-#endif
-        return ngx_http_esi_fetch_resource(r, ctx);
-#if 0
-    }
-#endif
-
-    return NGX_AGAIN;
+    return ngx_http_esi_fetch_resource(r, ctx);
 }
 
 
@@ -1382,121 +1354,6 @@ ngx_http_esi_parse_url(ngx_url_t *u, ngx_str_t *url, ngx_pool_t *pool)
 
     return NGX_OK;
 }
-
-
-#if 0
-static ngx_int_t
-ngx_http_esi_resolve_host(ngx_http_request_t *r, ngx_str_t *host)
-{
-    ngx_resolver_ctx_t        *ctx, temp;
-    ngx_http_core_loc_conf_t  *clcf;
-
-    temp.name = *host;
-    clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
-
-    ctx = ngx_resolve_start(clcf->resolver, &temp);
-    if (ctx == NULL) {
-        return NGX_ERROR;
-    }
-
-    if (ctx == NGX_NO_RESOLVER) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "no resolver defined to resolve %V", host);
-        return NGX_ERROR;
-    }
-
-    ctx->name = *host;
-    ctx->type = NGX_RESOLVE_A;
-    ctx->handler = ngx_http_esi_resolve_callback;
-    ctx->data = r;
-    ctx->timeout = clcf->resolver_timeout;
-
-    if (ngx_resolve_name(ctx) != NGX_OK) {
-        return NGX_ERROR;
-    }
-
-    return NGX_OK;
-}
-
-
-static void
-ngx_http_esi_resolve_callback(ngx_resolver_ctx_t *ctx)
-{
-    u_char              *p;
-    size_t               len;
-    ngx_uint_t           i;
-    struct sockaddr_in  *sin;
-    ngx_http_request_t  *r;
-    ngx_http_esi_ctx_t  *ectx;
-
-    r = ctx->data;
-
-    ectx = ngx_http_get_module_ctx(r, ngx_http_esi_filter_module);
-
-    if (ctx->state) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "%V could not be resolved (%i: %s)",
-                      &ctx->name, ctx->state,
-                      ngx_resolver_strerror(ctx->state));
-
-        /*TODO*/
-    }
-
-#if (NGX_DEBUG)
-    {
-    in_addr_t   addr;
-    ngx_uint_t  i;
-
-    for (i = 0; i < ctx->naddrs; i++) {
-        addr = ntohl(ctx->addrs[i]);
-
-        ngx_log_debug4(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                       "name was resolved to %ud.%ud.%ud.%ud",
-                       (addr >> 24) & 0xff, (addr >> 16) & 0xff,
-                       (addr >> 8) & 0xff, addr & 0xff);
-    }
-    }
-#endif
-
-    ectx->u.naddrs = ctx->naddrs;
-
-    ectx->u.addrs = ngx_pcalloc(r->pool, ctx->naddrs * sizeof(ngx_addr_t));
-    if (ectx->u.addrs == NULL) {
-        /*TODO*/
-    }
-
-    for (i = 0; i < ctx->naddrs; i++) {
-
-        sin = ngx_pcalloc(r->pool, sizeof(struct sockaddr_in));
-        if (sin == NULL) {
-            /*TODO*/
-        }
-
-        *sin = *(struct sockaddr_in *) &ctx->addrs[i];
-
-        ectx->u.addrs[i].sockaddr = (struct sockaddr *) sin;
-        ectx->u.addrs[i].socklen = sizeof(struct sockaddr_in);
-
-        len = NGX_INET_ADDRSTRLEN + sizeof(":65535") - 1;
-
-        p = ngx_pnalloc(r->pool, len);
-        if (p == NULL) {
-            /*TODO*/
-        }
-
-        len = ngx_sock_ntop((struct sockaddr *) sin, p, len, 1);
-
-        ectx->u.addrs[i].name.len = len;
-        ectx->u.addrs[i].name.data = p;
-    }
-
-    ngx_resolve_name_done(ctx);
-
-    ectx->wait_resolver = 0;
-
-    ngx_http_esi_fetch_resource(r, ectx);
-}
-#endif
 
 
 static void *
