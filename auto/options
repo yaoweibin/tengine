@@ -18,7 +18,7 @@ NGX_GROUP=
 NGX_DSO_PATH=
 NGX_DSO_TOOL_PATH=
 
-CC=${CC:-gcc}
+CC=${CC:-cc}
 CPP=
 NGX_OBJS=objs
 
@@ -164,6 +164,7 @@ HTTP_CACHE=YES
 HTTP_CHARSET=YES
 HTTP_GZIP=YES
 HTTP_SSL=YES
+HTTP_SPDY=YES
 HTTP_SSI=YES
 HTTP_POSTPONE=NO
 HTTP_REALIP=NO
@@ -203,6 +204,7 @@ HTTP_SYSGUARD=NO
 HTTP_FLV=NO
 HTTP_SLICE=NO
 HTTP_MP4=NO
+HTTP_GUNZIP=NO
 HTTP_GZIP_STATIC=NO
 HTTP_UPSTREAM_IP_HASH=YES
 HTTP_FOOTER=YES
@@ -387,6 +389,7 @@ do
         --http-scgi-temp-path=*)                   NGX_HTTP_SCGI_TEMP_PATH="$value" ;;
 
         --with-http_ssl_module)                    HTTP_SSL=YES                      ;;
+        --with-http_spdy_module)                   HTTP_SPDY=YES                     ;;
         --with-http_realip_module)                 HTTP_REALIP=YES                   ;;
         --with-http_addition_module)               HTTP_ADDITION=YES
                                                    HTTP_ADDITION_SHARED=NO           ;;
@@ -405,6 +408,7 @@ do
                                                    HTTP_SLICE_SHARED=NO              ;;
         --with-http_mp4_module)                    HTTP_MP4=YES
                                                    HTTP_MP4_SHARED=NO                ;;
+        --with-http_gunzip_module)                 HTTP_GUNZIP=YES                   ;;
         --with-http_gzip_static_module)            HTTP_GZIP_STATIC=YES              ;;
         --with-http_concat_module)                 HTTP_CONCAT=YES
                                                    HTTP_CONCAT_SHARED=NO             ;;
@@ -497,6 +501,7 @@ do
         --without-http_gzip_module)      HTTP_GZIP=NO               ;;
         --without-http_ssi_module)       HTTP_SSI=NO                ;;
         --without-http_ssl_module)       HTTP_SSL=NO                ;;
+        --without-http_spdy_module)      HTTP_SPDY=NO               ;;
         --without-http_userid_module)    HTTP_USERID=NO
                                          HTTP_USERID_SHARED=NO      ;;
         --without-http_footer_module)    HTTP_FOOTER=NO
@@ -694,6 +699,7 @@ cat << END
   --with-http_flv_module             enable ngx_http_flv_module
   --with-http_slice_module           enable ngx_http_slice_module
   --with-http_mp4_module             enable ngx_http_mp4_module
+  --with-http_gunzip_module          enable ngx_http_gunzip_module
   --with-http_gzip_static_module     enable ngx_http_gzip_static_module
   --with-http_concat_module          enable ngx_http_concat_module
   --with-http_random_index_module    enable ngx_http_random_index_module
@@ -755,6 +761,7 @@ cat << END
   --without-http_gzip_module         disable ngx_http_gzip_filter_module
   --without-http_ssi_module          disable ngx_http_ssi_module
   --without-http_ssl_module          disable ngx_http_ssl_module
+  --without-http_spdy_module         disable ngx_http_spdy_module
   --without-http_userid_module       disable ngx_http_userid_filter_module
   --without-http_footer_filter_module
                                      disable ngx_http_footer_filter_module
